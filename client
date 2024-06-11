@@ -1,0 +1,76 @@
+#!/usr/bin/env pybricks-micropython
+from pybricks.hubs import EV3Brick
+from pybricks.ev3devices import Motor
+from pybricks.parameters import Port
+from pybricks.robotics import DriveBase
+import socket
+import gc
+import time  # Import the time module to add delays
+
+# Initialize the EV3 Brick
+ev3 = EV3Brick()
+
+# Initialize the drive base
+left_motor = Motor(Port.C)
+right_motor = Motor(Port.B)
+pick_up = Motor(Port.D)
+
+robot = DriveBase(left_motor, right_motor, wheel_diameter=56, axle_track=114)
+pick_up.run(200)
+
+# Set the server's IP address and port number
+HOST, PORT = '192.168.252.28', 8000
+
+# Create a TCP/IP socket
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+bufSize = 1024
+
+# Functions
+def receive_instructions():
+    try:
+        received_command = sock.recv(bufSize)  # The buffer size is 1024 bytes
+        return received_command
+    except Exception as e:
+        print("No message or error occurred: ", e)
+        return None
+
+def execute_instruction(instruction):
+    # Instruction format: "2,turn_angle,distance"
+    parts = instruction.split(',')
+    if parts[0] == '2':
+        turn_angle = float(parts[1])
+        distance = float(parts[2])
+        print("Received instruction to turn {} degrees and move {} mm".format(turn_angle, distance))
+        ev3.speaker.beep()  # Beep to indicate instruction receipt
+        # Uncomment below lines if you want to test with actual movement
+        robot.turn(turn_angle * 4.5)
+        robot.straight(distance * 1.8 * -1)
+        # Send acknowledgment to the server 
+        sock.sendall("ACK".encode())
+        print("Sent ACK")  # Debugging: Confirm acknowledgment sent
+        time.sleep(1)  # Add a small delay to ensure the ACK is sent
+
+# Main
+try:
+    sock.connect((HOST, PORT))
+    print("Connected to server.")
+
+    # Send the initial position message to the server
+    start_message = '0,0'  # Example starting position
+    sock.sendall(start_message.encode())
+    time.sleep(1)  # Add a small delay to ensure the initial message is sent
+
+    while True:
+        received_command = receive_instructions()
+        while received_command:
+            instruction = received_command.decode()
+            execute_instruction(instruction)
+            received_command = receive_instructions()
+        gc.collect()
+
+except Exception as e:
+    print("Failed to connect or error occurred: ", e)
+
+finally:
+    sock.close()
+    print("Socket closed. Program finished.")

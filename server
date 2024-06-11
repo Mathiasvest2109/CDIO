@@ -1,0 +1,106 @@
+import socket
+import math
+import time
+
+class RobotNavigation:
+    def __init__(self, start_position):
+        self.position = start_position
+        self.angle = -180  # Initial angle set to -90 degrees based on the robot facing left
+
+    @staticmethod
+    def calculate_distance_and_angle(current_position, next_position):
+        dx = next_position[0] - current_position[0]
+        dy = next_position[1] - current_position[1]
+        distance = math.sqrt(dx**2 + dy**2)
+        angle = math.degrees(math.atan2(dy, dx))
+        print(f"dx: {dx}, dy: {dy}, distance: {distance}, angle: {angle}")  # Debugging
+        return distance, angle
+
+    def is_in_obstacle(self, position):
+        # Define the boundaries of the 200x200 mm box in the center
+        obstacle_min_x = -100
+        obstacle_max_x = 100
+        obstacle_min_y = -100
+        obstacle_max_y = 100
+        x, y = position
+        return obstacle_min_x <= x <= obstacle_max_x and obstacle_min_y <= y <= obstacle_max_y
+
+    def normalize_angle(self, angle):
+        # Normalize the angle to be within the range of -180 to 180 degrees
+        while angle > 180:
+            angle -= 360
+        while angle < -180:
+            angle += 360
+        return angle
+
+    def navigate_to(self, next_position):
+        if self.is_in_obstacle(next_position):
+            print(f"Cannot navigate to {next_position}, position is within the obstacle.")
+            return None  # Indicate that navigation to this position is not possible
+        distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
+        print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
+        turn_angle = self.normalize_angle(target_angle - self.angle)  # Normalize the turn angle
+        print(f"Calculated Turn Angle: {turn_angle}")  # Debugging calculated turn angle
+        self.position = next_position
+        self.angle = target_angle
+        # Format the instruction as a string before returning
+        instruction = f"2,{turn_angle},{distance}"
+        print(f"Current Position: {self.position}, Target Position: {next_position}, Distance: {distance}")  # Debugging
+        return instruction
+
+def tcpserver(host='192.168.252.28', port=8000):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, port))
+        s.listen()
+        print(f"TCP Server listening on {host}:{port}")
+
+        conn, addr = s.accept()
+        with conn:
+            print(f"Connected to {addr}")
+            start_position = (700, -400)  # Example start position
+            robot = RobotNavigation(start_position)
+
+            # Wait for the initial position message from the client
+            initial_message = conn.recv(1024).decode()
+            print(f"Received initial message from client: {initial_message}")
+
+            # Define the hardcoded grid and object positions
+            ball_positions = [
+                ("golden_ball", (0, -300)),
+                ("tennis_ball", (-700, -500)),
+                ("goose_egg", (-100, 50)),
+                ("tennis_ball", (-350, 300)),
+                ("tennis_ball", (200, 200)),
+                ("tennis_ball", (350, 0))
+            ]
+
+            # Sort balls by priority: golden balls first, then tennis balls, avoid goose eggs
+            ball_positions = sorted(ball_positions, key=lambda x: (x[0] != "golden_ball", x[0] == "goose_egg"))
+
+            for ball_type, position in ball_positions:
+                if ball_type == "goose_egg":
+                    print(f"Avoiding {ball_type} at position {position}")
+                    continue
+                instruction = robot.navigate_to(position)
+                if instruction:
+                    print(f"Sending instruction for {ball_type} at position {position}: {instruction}")
+                    conn.sendall(instruction.encode())
+                    # Wait for acknowledgment from the client before sending the next instruction
+                    ack = conn.recv(1024).decode()
+                    print(f"Received ACK: {ack}")  # Debugging: Print the received acknowledgment
+                    if ack != "ACK":
+                        print("Failed to receive acknowledgment from the client")
+                        break
+                else:
+                    print(f"Skipped {ball_type} at position {position} due to obstacle.")
+
+            # Wait for any new instructions or updates from the client
+            while True:
+                update = conn.recv(1024)
+                if update:
+                    update_message = update.decode()
+                    print(f"Received update from client: {update_message}")
+                    # Handle the update message, update ball positions, or any other logic as needed
+
+if __name__ == "__main__":
+    tcpserver()

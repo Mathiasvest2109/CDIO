@@ -1,6 +1,5 @@
 import socket
 import math
-import time
 
 class RobotNavigation:
     def __init__(self, start_position):
@@ -8,22 +7,141 @@ class RobotNavigation:
         self.angle = -180  # Initial angle set to -90 degrees based on the robot facing left
 
     @staticmethod
-    def calculate_distance_and_angle(current_position, next_position):
+    def euclidean_distance(point1, point2):
+        return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
+
+    @staticmethod
+    def do_intersect(p1, q1, p2, q2):
+        def orientation(p, q, r):
+            val = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+            if val == 0:
+                return 0
+            elif val > 0:
+                return 1
+            else:
+                return 2
+
+        def on_segment(p, q, r):
+            if (q[0] <= max(p[0], r[0]) and q[0] >= min(p[0], r[0]) and
+                q[1] <= max(p[1], r[1]) and q[1] >= min(p[1], r[1])):
+                return True
+            return False
+
+        o1 = orientation(p1, q1, p2)
+        o2 = orientation(p1, q1, q2)
+        o3 = orientation(p2, q2, p1)
+        o4 = orientation(p2, q2, q1)
+
+        if o1 != o2 and o3 != o4:
+            return True
+
+        if o1 == 0 and on_segment(p1, p2, q1):
+            return True
+
+        if o2 == 0 and on_segment(p1, q2, q1):
+            return True
+
+        if o3 == 0 and on_segment(p2, p1, q2):
+            return True
+
+        if o4 == 0 and on_segment(p2, q1, q2):
+            return True
+
+        return False
+
+    @staticmethod
+    def is_area_between(point_a, point_b, area_top_left, area_bottom_right, collector_size):
+        collector_width, collector_height = collector_size
+        buffer_x = collector_width / 2
+        buffer_y = collector_height / 2
+        
+        # Expand the area by the collector size
+        expanded_top_left = (area_top_left[0] - buffer_x, area_top_left[1] + buffer_y)
+        expanded_bottom_right = (area_bottom_right[0] + buffer_x, area_bottom_right[1] - buffer_y)
+        
+        # Define the corners of the expanded rectangle
+        top_left = expanded_top_left
+        top_right = (expanded_bottom_right[0], expanded_top_left[1])
+        bottom_left = (expanded_top_left[0], expanded_bottom_right[1])
+        bottom_right = expanded_bottom_right
+
+        # Check if the line segment intersects with any of the four edges of the rectangle
+        if (RobotNavigation.do_intersect(point_a, point_b, top_left, top_right) or
+            RobotNavigation.do_intersect(point_a, point_b, top_right, bottom_right) or
+            RobotNavigation.do_intersect(point_a, point_b, bottom_right, bottom_left) or
+            RobotNavigation.do_intersect(point_a, point_b, bottom_left, top_left)):
+            return True
+
+        return False
+
+    def find_closest_reachable_ball(self, current_position, balls, areas, collector_size):
+        min_distance = float('inf')
+        closest_ball = None
+
+        for ball in balls:
+            ball_position = ball[1]
+            is_reachable = True
+
+            for area in areas:
+                if RobotNavigation.is_area_between(current_position, ball_position, area[0], area[1], collector_size):
+                    is_reachable = False
+                    break
+
+            if is_reachable:
+                distance = RobotNavigation.euclidean_distance(current_position, ball_position)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_ball = ball
+
+        return closest_ball
+
+    def move_towards_target(self, current_position, target_position, areas, collector_size, step=50):
+        route = []
+        while current_position != target_position:
+            next_position = current_position
+            if target_position[0] > current_position[0]:
+                next_position = (current_position[0] + step, current_position[1])
+            elif target_position[0] < current_position[0]:
+                next_position = (current_position[0] - step, current_position[1])
+            elif target_position[1] > current_position[1]:
+                next_position = (current_position[0], current_position[1] + step)
+            elif target_position[1] < current_position[1]:
+                next_position = (current_position[0], current_position[1] - step)
+            
+            # Check if the move is valid
+            is_reachable = True
+            for area in areas:
+                if RobotNavigation.is_area_between(current_position, next_position, area[0], area[1], collector_size):
+                    is_reachable = False
+                    break
+            
+            if is_reachable:
+                current_position = next_position
+                route.append(("move", current_position))
+            else:
+                # Try the next direction
+                if target_position[0] != current_position[0]:
+                    if target_position[0] > current_position[0]:
+                        current_position = (current_position[0] + step, current_position[1])
+                    else:
+                        current_position = (current_position[0] - step, current_position[1])
+                    route.append(("move", current_position))
+                elif target_position[1] != current_position[1]:
+                    if target_position[1] > current_position[1]:
+                        current_position = (current_position[0], current_position[1] + step)
+                    else:
+                        current_position = (current_position[0], current_position[1] - step)
+                    route.append(("move", current_position))
+
+        return route
+    
+    def calculate_distance_and_angle(self, current_position, next_position):
         dx = next_position[0] - current_position[0]
         dy = next_position[1] - current_position[1]
         distance = math.sqrt(dx**2 + dy**2)
         angle = math.degrees(math.atan2(dy, dx))
         print(f"dx: {dx}, dy: {dy}, distance: {distance}, angle: {angle}")  # Debugging
         return distance, angle
-
-    def is_in_obstacle(self, position):
-        # Define the boundaries of the 200x200 mm box in the center
-        obstacle_min_x = -100
-        obstacle_max_x = 100
-        obstacle_min_y = -100
-        obstacle_max_y = 100
-        x, y = position
-        return obstacle_min_x <= x <= obstacle_max_x and obstacle_min_y <= y <= obstacle_max_y
 
     def normalize_angle(self, angle):
         # Normalize the angle to be within the range of -180 to 180 degrees
@@ -34,9 +152,6 @@ class RobotNavigation:
         return angle
 
     def navigate_to(self, next_position):
-        #if self.is_in_obstacle(next_position):
-        #    print(f"Cannot navigate to {next_position}, position is within the obstacle.")
-        #    return None  # Indicate that navigation to this position is not possible
         distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
         print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
         turn_angle = self.normalize_angle(target_angle - self.angle)  # Normalize the turn angle
@@ -49,43 +164,127 @@ class RobotNavigation:
         return instruction
 
 def tcpserver(host='192.168.252.28', port=8000):
+    # Define the hardcoded grid and object positions
+    ball_positions = [ 
+        ("golden_ball", (0, -300)),
+        ("tennis_ball", (-700, -500)),
+        ("tennis_ball", (-350, 300)),
+        ("tennis_ball", (50, 50)),
+        ("tennis_ball", (350, 0))
+    ]
+    
+    start_position = (360, -430)
+    goose_egg_position = (-50, 50)
+    target_position = (550, 0)  # Final target position
+    
+    # Define the areas (top-left and bottom-right corners)
+    areas = [
+        ((-15, 100), (15, -100)),
+        ((-100, 15), (100, -15)),
+        ((0, 0), (0, 0)),
+        ((834, 625), (850, -625)),
+        ((-850, 625), (-834, -625)),
+        ((-850, 625), (850, 609)),
+        ((-850, -609), (850, -625))
+    ]
+    
+    # Determine the quadrant and update area_top_left3 and area_bottom_right3
+    kvadrant_egg = 1
+    if goose_egg_position[0] > 0:
+        if goose_egg_position[1] > 0:
+            kvadrant_egg = 1
+        else:
+            kvadrant_egg = 4
+    else:
+        if goose_egg_position[1] > 0:
+            kvadrant_egg = 2
+        else:
+            kvadrant_egg = 3
+    
+    if kvadrant_egg == 1:
+        area_top_left3 = (15, 100)
+        area_bottom_right3 = (100, 15)
+    elif kvadrant_egg == 2:
+        area_top_left3 = (-100, 100)
+        area_bottom_right3 = (-15, 15)
+    elif kvadrant_egg == 3:
+        area_top_left3 = (-100, -15)
+        area_bottom_right3 = (-15, -100)
+    elif kvadrant_egg == 4:
+        area_top_left3 = (15, -15)
+        area_bottom_right3 = (100, -100)
+    else:
+        area_top_left3 = (0, 0)
+        area_bottom_right3 = (0, 0)
+    
+    areas[2] = (area_top_left3, area_bottom_right3)
+    
+    # Define the size of the collector
+    collector_size = (90, 90)  # Width and height of the collector
+    
+    # List to store the route
+    route = []
+    
+    # Initial position
+    current_position = start_position
+    
+    # Ensure the golden ball is visited first or second
+    golden_ball = next(ball for ball in ball_positions if ball[0] == "golden_ball")
+    ball_positions.remove(golden_ball)
+    route.append(golden_ball)
+    current_position = golden_ball[1]
+    
+    # Find the closest reachable ball and update the route
+    robot_navigation = RobotNavigation(start_position)
+    while ball_positions:
+        closest_ball = robot_navigation.find_closest_reachable_ball(current_position, ball_positions, areas, collector_size)
+        if closest_ball:
+            route.append(closest_ball)
+            current_position = closest_ball[1]
+            ball_positions.remove(closest_ball)
+        else:
+            # Move in the direction to reach any remaining balls, in steps of 50
+            if any(ball[1][0] > current_position[0] for ball in ball_positions):
+                current_position = (current_position[0] + 50, current_position[1])
+                route.append(("move", current_position))
+            elif any(ball[1][0] < current_position[0] for ball in ball_positions):
+                current_position = (current_position[0] - 50, current_position[1])
+                route.append(("move", current_position))
+            elif any(ball[1][1] > current_position[1] for ball in ball_positions):
+                current_position = (current_position[0], current_position[1] + 50)
+                route.append(("move", current_position))
+            elif any(ball[1][1] < current_position[1] for ball in ball_positions):
+                current_position = (current_position[0], current_position[1] - 50)
+                route.append(("move", current_position))
+    
+    # Try to move directly to the final target position
+    if not any(robot_navigation.is_area_between(current_position, target_position, area[0], area[1], collector_size) for area in areas):
+        route.append(("move", target_position))
+    else:
+        # Move to the final target position in steps of 50 units, avoiding obstacles
+        final_route = robot_navigation.move_towards_target(current_position, target_position, areas, collector_size)
+        route.extend(final_route)
+    
+    # Output the route
+    print("Route to collect all balls and reach the target position:")
+    for step in route:
+        print(f"{step[0]} at {step[1]}")
+        
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((host, port))
         s.listen()
         print(f"TCP Server listening on {host}:{port}")
-
+        
         conn, addr = s.accept()
         with conn:
             print(f"Connected to {addr}")
-            #start_position = (350, -450)  # Example start position
-            start_position = (0, 0)  # Example start position
             robot = RobotNavigation(start_position)
-
+            
             # Wait for the initial position message from the client
             initial_message = conn.recv(1024).decode()
             print(f"Received initial message from client: {initial_message}")
-
-            # Define the hardcoded grid and object positions
-            ball_positions = [
-                #("golden_ball", (-550, -375)),
-                #("tennis_ball", (-550, 270)),
-                #("tennis_ball", (-280, 0)),
-                #("tennis_ball", (410, 365)),
-                #("tennis_ball", (490, -145))
-                ("golden_ball", (0, 100)),
-                ("tennis_ball", (100, 100)),
-                ("tennis_ball", (100, -100)),
-                ("tennis_ball", (-100, -100)),
-                ("tennis_ball", (0, 0))
-            ]
-
-            # Sort balls by priority: golden balls first, then tennis balls, avoid goose eggs
-            ball_positions = sorted(ball_positions, key=lambda x: (x[0] != "golden_ball", x[0] == "goose_egg"))
-
-            for ball_type, position in ball_positions:
-                if ball_type == "goose_egg":
-                    print(f"Avoiding {ball_type} at position {position}")
-                    continue
+            
+            for ball_type, position in route:
                 instruction = robot.navigate_to(position)
                 if instruction:
                     print(f"Sending instruction for {ball_type} at position {position}: {instruction}")
@@ -96,9 +295,7 @@ def tcpserver(host='192.168.252.28', port=8000):
                     if ack != "ACK":
                         print("Failed to receive acknowledgment from the client")
                         break
-                else:
-                    print(f"Skipped {ball_type} at position {position} due to obstacle.")
-
+    
             # Wait for any new instructions or updates from the client
             while True:
                 update = conn.recv(1024)

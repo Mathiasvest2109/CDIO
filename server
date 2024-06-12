@@ -166,16 +166,16 @@ class RobotNavigation:
 def tcpserver(host='192.168.252.28', port=8000):
     # Define the hardcoded grid and object positions
     ball_positions = [ 
-        ("golden_ball", (0, -300)),
-        ("tennis_ball", (-700, -500)),
-        ("tennis_ball", (-350, 300)),
-        ("tennis_ball", (50, 50)),
-        ("tennis_ball", (350, 0))
+        ("golden_ball", (-550, -375)),
+        ("tennis_ball", (-550, 270)),
+        ("tennis_ball", (-270, 0)),
+        ("tennis_ball", (385, 350)),
+        ("tennis_ball", (490, -145))
     ]
     
-    start_position = (360, -430)
-    goose_egg_position = (-50, 50)
-    target_position = (550, 0)  # Final target position
+    start_position = (350, -450)
+    goose_egg_position = (-50, -50)
+    final_position = (550, 0)  # Final target position
     
     # Define the areas (top-left and bottom-right corners)
     areas = [
@@ -258,11 +258,11 @@ def tcpserver(host='192.168.252.28', port=8000):
                 route.append(("move", current_position))
     
     # Try to move directly to the final target position
-    if not any(robot_navigation.is_area_between(current_position, target_position, area[0], area[1], collector_size) for area in areas):
-        route.append(("move", target_position))
+    if not any(robot_navigation.is_area_between(current_position, final_position, area[0], area[1], collector_size) for area in areas):
+        route.append(("move", final_position))
     else:
         # Move to the final target position in steps of 50 units, avoiding obstacles
-        final_route = robot_navigation.move_towards_target(current_position, target_position, areas, collector_size)
+        final_route = robot_navigation.move_towards_target(current_position, final_position, areas, collector_size)
         route.extend(final_route)
     
     # Output the route

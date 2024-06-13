@@ -264,6 +264,9 @@ def tcpserver(host='192.168.252.28', port=8000):
         # Move to the final target position in steps of 50 units, avoiding obstacles
         final_route = robot_navigation.move_towards_target(current_position, final_position, areas, collector_size)
         route.extend(final_route)
+
+    # deposit turn codinates
+    route.append(("deposit", (549,0)))
     
     # Output the route
     print("Route to collect all balls and reach the target position:")

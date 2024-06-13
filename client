@@ -1,14 +1,21 @@
 #!/usr/bin/env pybricks-micropython
 from pybricks.hubs import EV3Brick
-from pybricks.ev3devices import Motor
-from pybricks.parameters import Port
+from pybricks.ev3devices import Motor, GyroSensor
+from pybricks.parameters import Port, Stop
 from pybricks.robotics import DriveBase
+from pybricks.tools import wait
 import socket
 import gc
-import time  # Import the time module to add delays
+import time
 
 # Initialize the EV3 Brick
 ev3 = EV3Brick()
+
+# Initialize the gyroscope sensor
+gyro = GyroSensor(Port.S4)  # Ensure the gyroscope is connected to the correct port
+
+# Reset the gyroscope to 0 degrees
+gyro.reset_angle(0)
 
 # Initialize the drive base
 left_motor = Motor(Port.C)
@@ -16,7 +23,7 @@ right_motor = Motor(Port.B)
 pick_up = Motor(Port.D)
 
 robot = DriveBase(left_motor, right_motor, wheel_diameter=56, axle_track=114)
-pick_up.run(200)
+pick_up.run(400)
 
 # Set the server's IP address and port number
 HOST, PORT = '192.168.252.28', 8000
@@ -34,6 +41,36 @@ def receive_instructions():
         print("No message or error occurred: ", e)
         return None
 
+def turn_mode(turn_angle):
+    # Reset the gyroscope to 0 degrees before starting the turn
+    gyro.reset_angle(0)
+    
+    # Determine the turn speed
+    turn_speed = 300  # Adjust as needed
+
+    # Start turning the robot
+    if turn_angle > 0:
+        left_motor.run(turn_speed)
+        right_motor.run(-turn_speed)
+    else:
+        left_motor.run(-turn_speed)
+        right_motor.run(turn_speed)
+    
+    # Continue turning until the target angle is reached
+    while True:
+        current_angle = gyro.angle()
+        print("Current angle: {}".format(current_angle))
+        
+        # Check if the target angle is reached maybe
+        if abs(current_angle) >= abs(turn_angle) -1.5:
+            left_motor.stop(Stop.BRAKE)
+            right_motor.stop(Stop.BRAKE)
+            ev3.speaker.beep()  # Beep to indicate the robot has reached the target angle
+            print("Beep! Registered a {} degree turn.".format(turn_angle))
+            break
+        
+        #wait(10)  # Wait for a short period before checking the angle again
+
 def execute_instruction(instruction):
     # Instruction format: "2,turn_angle,distance"
     parts = instruction.split(',')
@@ -42,13 +79,20 @@ def execute_instruction(instruction):
         distance = float(parts[2])
         print("Received instruction to turn {} degrees and move {} mm".format(turn_angle, distance))
         ev3.speaker.beep()  # Beep to indicate instruction receipt
-        # Uncomment below lines if you want to test with actual movement
-        robot.turn(turn_angle * 4.5)
-        robot.straight(distance * 1.8 * -1)
+
+        # Use turn_mode to perform the turn using the gyroscope
+        turn_mode(turn_angle)
+
+        # Move straight for the specified distance
+        robot.straight((distance * 1.8 * -1) + 160)
+        
+        # Ensure the robot completes the straight movement before proceeding
+        robot.stop()
+
         # Send acknowledgment to the server 
         sock.sendall("ACK".encode())
         print("Sent ACK")  # Debugging: Confirm acknowledgment sent
-        time.sleep(1)  # Add a small delay to ensure the ACK is sent
+        wait(1000)  # Add a small delay to ensure the ACK is sent
 
 # Main
 try:

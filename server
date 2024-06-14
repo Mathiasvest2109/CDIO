@@ -162,6 +162,17 @@ class RobotNavigation:
         instruction = f"2,{turn_angle},{distance}"
         print(f"Current Position: {self.position}, Target Position: {next_position}, Distance: {distance}")  # Debugging
         return instruction
+    def deposit_balls(self, next_position):
+        distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
+        print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
+        turn_angle = self.normalize_angle(target_angle - self.angle)  # Normalize the turn angle
+        print(f"Calculated Turn Angle: {turn_angle}")  # Debugging calculated turn angle
+        self.position = next_position
+        self.angle = target_angle
+        # Format the instruction as a string before returning
+        instruction = f"1,{turn_angle},{distance}"
+        print(f"Current Position: {self.position}, Target Position: {next_position}, Distance: {distance}")  # Debugging
+        return instruction
 
 def tcpserver(host='192.168.252.28', port=8000):
     # Define the hardcoded grid and object positions
@@ -288,7 +299,11 @@ def tcpserver(host='192.168.252.28', port=8000):
             print(f"Received initial message from client: {initial_message}")
             
             for ball_type, position in route:
-                instruction = robot.navigate_to(position)
+                if ball_type == "deposit":
+		            instruction = robot.deposit_balls(position)
+		        else:
+               	    instruction = robot.navigate_to(position)
+                
                 if instruction:
                     print(f"Sending instruction for {ball_type} at position {position}: {instruction}")
                     conn.sendall(instruction.encode())

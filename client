@@ -93,6 +93,31 @@ def execute_instruction(instruction):
         sock.sendall("ACK".encode())
         print("Sent ACK")  # Debugging: Confirm acknowledgment sent
         wait(1000)  # Add a small delay to ensure the ACK is sent
+    elif parts[0] == '1':
+        turn_angle = float(parts[1])
+        distance = float(parts[2])
+        print("Received instruction to turn {} degrees and move {} mm".format(turn_angle, distance))
+        ev3.speaker.beep()  # Beep to indicate instruction receipt
+
+        # Use turn_mode to perform the turn using the gyroscope
+        turn_mode(turn_angle)
+
+        # Move back if needed
+        # robot.straight((distance * 1.8 * -1) + 160)
+	
+	    # Deposit balls
+	    # robot.open_door # test how much to open perfect
+	    # wait(3000)  # test how long for all balls to come out
+	    # robot.close_door # test how much to close pefect
+	
+        
+        # Ensure the robot completes the straight movement before proceeding
+        robot.stop()
+
+        # Send acknowledgment to the server 
+        sock.sendall("ACK".encode())
+        print("Sent ACK")  # Debugging: Confirm acknowledgment sent
+        wait(1000)  # Add a small delay to ensure the ACK is sent
 
 # Main
 try:

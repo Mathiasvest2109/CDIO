@@ -52,8 +52,9 @@ height_coords = []
 width_coords = []
 
 # Replace these with the actual measured width and length in millimeters
-bredde_millimeter = 1220  # Example value
 længde_millimeter = 1670  # Example value
+bredde_millimeter = 1220  # Example value
+
 
 while True:
     # Capture frame-by-frame
@@ -125,8 +126,9 @@ while True:
     # Ensure height and width coordinates are found
     if height_coords and width_coords and cross_coords:
         # Calculate the conversion factors
-        y_forskel = bredde_millimeter / (height_coords[0][2] - height_coords[0][0])
-        x_forskel = længde_millimeter / (width_coords[0][3] - width_coords[0][1])
+        y_forskel = længde_millimeter / (height_coords[0][3] - height_coords[0][1])
+        x_forskel = bredde_millimeter / (width_coords[0][2] - width_coords[0][0])
+        
         print(f"yforksle er {y_forskel}\n xforskel er {x_forskel}\n")
         # Convert white ball coordinates
         for i in range(len(white_ball_coords)):

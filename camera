@@ -52,8 +52,8 @@ height_coords = []
 width_coords = []
 
 # Replace these with the actual measured width and length in millimeters
-bredde_millimeter = 1000  # Example value
-længde_millimeter = 2000  # Example value
+bredde_millimeter = 1220  # Example value
+længde_millimeter = 1670  # Example value
 
 while True:
     # Capture frame-by-frame

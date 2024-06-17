@@ -1,0 +1,122 @@
+import cv2
+import torch
+from ultralytics import YOLO
+import time
+
+# Load the trained YOLOv8 model
+model = YOLO(r'C:\Users\osman\OneDrive\Skrivebord\4.semster\CDIO-project\Robot\machine_learning\CDIO.v4i.yolov8\best.pt')
+
+# Define confidence thresholds for specific labels
+conf_thresholds = {
+    'Big_Goal': 1,
+    'Small_Goal': 1,
+    # Add more labels and their specific thresholds here if needed
+}
+
+# Default confidence threshold for other labels
+default_conf_threshold = 0.5
+
+# Define a color map for the classes
+color_map = {
+    'Big_Goal': (255, 0, 0),     # Red
+    'Cross': (0, 255, 0),        # Green
+    'Egg': (0, 0, 255),          # Blue
+    'Height': (255, 255, 0),     # Cyan
+    'Orange_ball': (255, 165, 0),# Orange
+    'Robot': (0, 255, 255),      # Yellow
+    'Small_Goal': (255, 0, 255), # Magenta
+    'White_ball': (255, 255, 255),# White
+    'Width': (128, 0, 128)       # Purple
+}
+
+# Initialize the webcam
+cap = cv2.VideoCapture(1)
+
+# Check if the webcam is opened correctly
+if not cap.isOpened():
+    print("Error: Could not open webcam.")
+    exit()
+
+# Variables to store center coordinates
+white_ball_coords = []
+egg_coords = None
+orange_ball_coords = None
+robot_coords = None
+cross_coords = None
+
+while True:
+    # Capture frame-by-frame
+    ret, frame = cap.read()
+    if not ret:
+        print("Error: Could not read frame.")
+        break
+
+    # Perform object detection every 5 seconds
+    start_time = time.time()
+    while time.time() - start_time < 5:
+        cv2.waitKey(1)
+
+    # Perform object detection with a low general threshold
+    results = model(frame, conf=default_conf_threshold)
+
+    # Clear the previous coordinates
+    white_ball_coords = []
+    egg_coords = None
+    orange_ball_coords = None
+    robot_coords = None
+    cross_coords = None
+
+    # Draw bounding boxes and labels on the frame
+    for result in results:
+        for box in result.boxes:
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            conf = box.conf[0].cpu().numpy()
+            cls = int(box.cls[0].cpu().numpy())
+            label = model.names[cls]
+
+            # Get the specific confidence threshold for this label
+            label_conf_threshold = conf_thresholds.get(label, default_conf_threshold)
+
+            # Only draw boxes that meet the specific confidence threshold
+            if conf >= label_conf_threshold:
+                # Get color from color map
+                color = color_map.get(label, (255, 255, 255))  # Default to white if class not in color map
+                
+                # Draw the bounding box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                # Put the label and confidence
+                cv2.putText(frame, f'{label} {conf:.2f}', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+                # Calculate the center of the bounding box
+                cx = (x1 + x2) // 2
+                cy = (y1 + y2) // 2
+
+                # Store center coordinates based on label
+                if label == 'White_ball':
+                    white_ball_coords.append((cx, cy))
+                elif label == 'Egg' and egg_coords is None:
+                    egg_coords = (cx, cy)
+                elif label == 'Orange_ball' and orange_ball_coords is None:
+                    orange_ball_coords = (cx, cy)
+                elif label == 'Robot' and robot_coords is None:
+                    robot_coords = (cx, cy)
+                elif label == 'Cross' and cross_coords is None:
+                    cross_coords = (cx, cy)
+
+    # Display the resulting frame
+    cv2.imshow('Webcam Object Detection', frame)
+
+    # Print stored coordinates
+    print("White Ball Center Coordinates:", white_ball_coords)
+    print("Egg Center Coordinates:", egg_coords)
+    print("Orange Ball Center Coordinates:", orange_ball_coords)
+    print("Robot Center Coordinates:", robot_coords)
+    print("Cross Center Coordinates:", cross_coords)
+
+    # Break the loop on 'q' key press
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Release the webcam and close the window
+cap.release()
+cv2.destroyAllWindows()

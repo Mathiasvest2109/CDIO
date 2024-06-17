@@ -159,9 +159,9 @@ while True:
 
     # Print stored coordinates
     print("White Ball Center Coordinates (in mm):", white_ball_coords)
-    #print("Egg Center Coordinates (in mm):", egg_coords)
+    print("Egg Center Coordinates (in mm):", egg_coords)
     print("Orange Ball Center Coordinates (in mm):", orange_ball_coords)
-    #print("Robot Center Coordinates (in mm):", robot_coords)
+    print("Robot Center Coordinates (in mm):", robot_coords)
     print("Cross Center Coordinates (in pixels):", cross_coords)
     print("Height Coordinates (in pixels):", height_coords)
     print("Width Coordinates (in pixels):", width_coords)

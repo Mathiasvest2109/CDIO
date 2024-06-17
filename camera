@@ -135,24 +135,24 @@ while True:
         # Convert white ball coordinates
         for i in range(len(white_ball_coords)):
             cords = white_ball_coords[i]
-            cords = (cords[0] + cross_coords[0], cords[1] - cross_coords[1])
-            cords = (cords[0] * x_forskel, cords[1] * y_forskel)
+            cords = (cords[0] - cross_coords[0], cords[1] - cross_coords[1])
+            cords = (cords[0] * x_forskel * (-1), cords[1] * y_forskel)
             white_ball_coords[i] = cords
 
         # Convert egg coordinates
         if egg_coords:
-            egg_coords = (egg_coords[0] + cross_coords[0], egg_coords[1] - cross_coords[1])
-            egg_coords = (egg_coords[0] * x_forskel, egg_coords[1] * y_forskel)
+            egg_coords = (egg_coords[0] - cross_coords[0], egg_coords[1] - cross_coords[1])
+            egg_coords = (egg_coords[0] * x_forskel * (-1), egg_coords[1] * y_forskel)
 
         # Convert orange ball coordinates
         if orange_ball_coords:
-            orange_ball_coords = (orange_ball_coords[0] + cross_coords[0], orange_ball_coords[1] - cross_coords[1])
-            orange_ball_coords = (orange_ball_coords[0] * x_forskel, orange_ball_coords[1] * y_forskel)
+            orange_ball_coords = (orange_ball_coords[0] - cross_coords[0], orange_ball_coords[1] - cross_coords[1])
+            orange_ball_coords = (orange_ball_coords[0] * x_forskel * (-1), orange_ball_coords[1] * y_forskel)
 
         # Convert robot coordinates
         if robot_coords:
-            robot_coords = (robot_coords[0] + cross_coords[0], robot_coords[1] - cross_coords[1])
-            robot_coords = (robot_coords[0] * x_forskel, robot_coords[1] * y_forskel)
+            robot_coords = (robot_coords[0] - cross_coords[0], robot_coords[1] - cross_coords[1])
+            robot_coords = (robot_coords[0] * x_forskel * (-1), robot_coords[1] * y_forskel)
 
     # Display the resulting frame
     cv2.imshow('Webcam Object Detection', frame)

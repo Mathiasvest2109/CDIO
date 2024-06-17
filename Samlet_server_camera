@@ -1,0 +1,504 @@
+import cv2
+import torch
+from ultralytics import YOLO
+import time
+import numpy as np
+import socket
+import math
+
+# Load the trained YOLOv8 model
+model = YOLO(r'C:\Users\osman\OneDrive\Skrivebord\4.semster\CDIO-project\Robot\machine_learning\CDIO.v4i.yolov8\best.pt')
+
+# Define confidence thresholds for specific labels
+conf_thresholds = {
+    'Big_Goal': 1,
+    'Small_Goal': 1,
+    'Height': 0.7,
+    'Width': 0.7
+    # Add more labels and their specific thresholds here if needed
+}
+
+# Default confidence threshold for other labels
+default_conf_threshold = 0.5
+
+# Define a color map for the classes
+color_map = {
+    'Big_Goal': (255, 0, 0),     # Red
+    'Cross': (0, 255, 0),        # Green
+    'Egg': (0, 0, 255),          # Blue
+    'Height': (255, 255, 0),     # Cyan
+    'Orange_ball': (255, 165, 0),# Orange
+    'Robot': (0, 255, 255),      # Yellow
+    'Small_Goal': (255, 0, 255), # Magenta
+    'White_ball': (255, 255, 255),# White
+    'Width': (128, 0, 128)       # Purple
+}
+
+# Initialize the webcam
+cap = cv2.VideoCapture(1)
+
+# Check if the webcam is opened correctly
+if not cap.isOpened():
+    print("Error: Could not open webcam.")
+    exit()
+
+# Variables to store center coordinates
+white_ball_coords = []
+egg_coords = None
+orange_ball_coords = None
+robot_coords = None
+cross_coords = None
+
+# Variables to store coordinates for Height and Width
+height_coords = []
+width_coords = []
+
+# Replace these with the actual measured width and length in millimeters
+længde_millimeter = 1670  # Example value
+bredde_millimeter = 1220  # Example value
+
+
+while True:
+    # Capture frame-by-frame
+    ret, frame = cap.read()
+    if not ret:
+        print("Error: Could not read frame.")
+        break
+
+    # Perform object detection every 5 seconds
+    start_time = time.time()
+    while time.time() - start_time < 5:
+        cv2.waitKey(1)
+
+    # Perform object detection with a low general threshold
+    results = model(frame, conf=default_conf_threshold)
+
+    # Clear the previous coordinates
+    white_ball_coords = []
+    egg_coords = None
+    orange_ball_coords = None
+    robot_coords = None
+    cross_coords = None
+
+    # Clear the coordinates for Height and Width
+    height_coords = []
+    width_coords = []
+
+    # Draw bounding boxes and labels on the frame
+    for result in results:
+        for box in result.boxes:
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            conf = box.conf[0].cpu().numpy()
+            cls = int(box.cls[0].cpu().numpy())
+            label = model.names[cls]
+
+            # Get the specific confidence threshold for this label
+            label_conf_threshold = conf_thresholds.get(label, default_conf_threshold)
+
+            # Only draw boxes that meet the specific confidence threshold
+            if conf >= label_conf_threshold:
+                # Get color from color map
+                color = color_map.get(label, (255, 255, 255))  # Default to white if class not in color map
+                
+                # Draw the bounding box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                # Put the label and confidence
+                cv2.putText(frame, f'{label} {conf:.2f}', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+                # Calculate the center of the bounding box
+                cx = (x1 + x2) // 2
+                cy = (y1 + y2) // 2
+
+                # Store center coordinates based on label
+                if label == 'White_ball':
+                    white_ball_coords.append((cx, cy))
+                elif label == 'Egg' and egg_coords is None:
+                    egg_coords = (cx, cy)
+                elif label == 'Orange_ball' and orange_ball_coords is None:
+                    orange_ball_coords = (cx, cy)
+                elif label == 'Robot' and robot_coords is None:
+                    robot_coords = (cx, cy)
+                elif label == 'Cross' and cross_coords is None:
+                    cross_coords = (cx, cy)
+                elif label == 'Height':
+                    height_coords.append((x1, y1, x2, y2))
+                elif label == 'Width':
+                    width_coords.append((x1, y1, x2, y2))
+
+    # Ensure height and width coordinates are found
+    if height_coords and width_coords and cross_coords:
+        # Calculate the conversion factors
+        print(f"hieght[0][3]= {height_coords[0][3]}, hieght[0][1]={height_coords[0][1]}")
+        print(f"width[0][2]= {width_coords[0][2]}, width[0][0]={width_coords[0][0]}")
+        y_forskel = bredde_millimeter / (width_coords[0][3] - width_coords[0][1])
+        x_forskel = længde_millimeter / (height_coords[0][2] - height_coords[0][0])
+        
+        print(f"yforksle er {y_forskel}\n xforskel er {x_forskel}\n")
+        # Convert white ball coordinates
+        for i in range(len(white_ball_coords)):
+            cords = white_ball_coords[i]
+            cords = (cords[0] - cross_coords[0], cords[1] - cross_coords[1])
+            cords = (cords[0] * x_forskel * (-1), cords[1] * y_forskel)
+            white_ball_coords[i] = cords
+
+        # Convert egg coordinates
+        if egg_coords:
+            egg_coords = (egg_coords[0] - cross_coords[0], egg_coords[1] - cross_coords[1])
+            egg_coords = (egg_coords[0] * x_forskel * (-1), egg_coords[1] * y_forskel)
+
+        # Convert orange ball coordinates
+        if orange_ball_coords:
+            orange_ball_coords = (orange_ball_coords[0] - cross_coords[0], orange_ball_coords[1] - cross_coords[1])
+            orange_ball_coords = (orange_ball_coords[0] * x_forskel * (-1), orange_ball_coords[1] * y_forskel)
+
+        # Convert robot coordinates
+        if robot_coords:
+            robot_coords = (robot_coords[0] - cross_coords[0], robot_coords[1] - cross_coords[1])
+            robot_coords = (robot_coords[0] * x_forskel * (-1), robot_coords[1] * y_forskel)
+
+    # Display the resulting frame
+    cv2.imshow('Webcam Object Detection', frame)
+
+    # Print stored coordinates
+    print("White Ball Center Coordinates (in mm):", white_ball_coords)
+    print("Egg Center Coordinates (in mm):", egg_coords)
+    print("Orange Ball Center Coordinates (in mm):", orange_ball_coords)
+    print("Robot Center Coordinates (in mm):", robot_coords)
+    print("Cross Center Coordinates (in pixels):", cross_coords)
+    print("Height Coordinates (in pixels):", height_coords)
+    print("Width Coordinates (in pixels):", width_coords)
+    
+    
+    class RobotNavigation:
+        def __init__(self, start_position):
+            self.position = start_position
+            self.angle = -180  # Initial angle set to -90 degrees based on the robot facing left
+    
+        @staticmethod
+        def euclidean_distance(point1, point2):
+            return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
+    
+        @staticmethod
+        def do_intersect(p1, q1, p2, q2):
+            def orientation(p, q, r):
+                val = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+                if val == 0:
+                    return 0
+                elif val > 0:
+                    return 1
+                else:
+                    return 2
+    
+            def on_segment(p, q, r):
+                if (q[0] <= max(p[0], r[0]) and q[0] >= min(p[0], r[0]) and
+                    q[1] <= max(p[1], r[1]) and q[1] >= min(p[1], r[1])):
+                    return True
+                return False
+    
+            o1 = orientation(p1, q1, p2)
+            o2 = orientation(p1, q1, q2)
+            o3 = orientation(p2, q2, p1)
+            o4 = orientation(p2, q2, q1)
+    
+            if o1 != o2 and o3 != o4:
+                return True
+    
+            if o1 == 0 and on_segment(p1, p2, q1):
+                return True
+    
+            if o2 == 0 and on_segment(p1, q2, q1):
+                return True
+    
+            if o3 == 0 and on_segment(p2, p1, q2):
+                return True
+    
+            if o4 == 0 and on_segment(p2, q1, q2):
+                return True
+    
+            return False
+    
+        @staticmethod
+        def is_area_between(point_a, point_b, area_top_left, area_bottom_right, collector_size):
+            collector_width, collector_height = collector_size
+            buffer_x = collector_width / 2
+            buffer_y = collector_height / 2
+            
+            # Expand the area by the collector size
+            expanded_top_left = (area_top_left[0] - buffer_x, area_top_left[1] + buffer_y)
+            expanded_bottom_right = (area_bottom_right[0] + buffer_x, area_bottom_right[1] - buffer_y)
+            
+            # Define the corners of the expanded rectangle
+            top_left = expanded_top_left
+            top_right = (expanded_bottom_right[0], expanded_top_left[1])
+            bottom_left = (expanded_top_left[0], expanded_bottom_right[1])
+            bottom_right = expanded_bottom_right
+    
+            # Check if the line segment intersects with any of the four edges of the rectangle
+            if (RobotNavigation.do_intersect(point_a, point_b, top_left, top_right) or
+                RobotNavigation.do_intersect(point_a, point_b, top_right, bottom_right) or
+                RobotNavigation.do_intersect(point_a, point_b, bottom_right, bottom_left) or
+                RobotNavigation.do_intersect(point_a, point_b, bottom_left, top_left)):
+                return True
+    
+            return False
+    
+        def find_closest_reachable_ball(self, current_position, balls, areas, collector_size):
+            min_distance = float('inf')
+            closest_ball = None
+    
+            for ball in balls:
+                ball_position = ball[1]
+                is_reachable = True
+    
+                for area in areas:
+                    if RobotNavigation.is_area_between(current_position, ball_position, area[0], area[1], collector_size):
+                        is_reachable = False
+                        break
+    
+                if is_reachable:
+                    distance = RobotNavigation.euclidean_distance(current_position, ball_position)
+                    if distance < min_distance:
+                        min_distance = distance
+                        closest_ball = ball
+    
+            return closest_ball
+    
+        def move_towards_target(self, current_position, target_position, areas, collector_size, step=50):
+            route = []
+            while current_position != target_position:
+                next_position = current_position
+                if target_position[0] > current_position[0]:
+                    next_position = (current_position[0] + step, current_position[1])
+                elif target_position[0] < current_position[0]:
+                    next_position = (current_position[0] - step, current_position[1])
+                elif target_position[1] > current_position[1]:
+                    next_position = (current_position[0], current_position[1] + step)
+                elif target_position[1] < current_position[1]:
+                    next_position = (current_position[0], current_position[1] - step)
+                
+                # Check if the move is valid
+                is_reachable = True
+                for area in areas:
+                    if RobotNavigation.is_area_between(current_position, next_position, area[0], area[1], collector_size):
+                        is_reachable = False
+                        break
+                
+                if is_reachable:
+                    current_position = next_position
+                    route.append(("move", current_position))
+                else:
+                    # Try the next direction
+                    if target_position[0] != current_position[0]:
+                        if target_position[0] > current_position[0]:
+                            current_position = (current_position[0] + step, current_position[1])
+                        else:
+                            current_position = (current_position[0] - step, current_position[1])
+                        route.append(("move", current_position))
+                    elif target_position[1] != current_position[1]:
+                        if target_position[1] > current_position[1]:
+                            current_position = (current_position[0], current_position[1] + step)
+                        else:
+                            current_position = (current_position[0], current_position[1] - step)
+                        route.append(("move", current_position))
+    
+            return route
+        
+        def calculate_distance_and_angle(self, current_position, next_position):
+            dx = next_position[0] - current_position[0]
+            dy = next_position[1] - current_position[1]
+            distance = math.sqrt(dx**2 + dy**2)
+            angle = math.degrees(math.atan2(dy, dx))
+            print(f"dx: {dx}, dy: {dy}, distance: {distance}, angle: {angle}")  # Debugging
+            return distance, angle
+    
+        def normalize_angle(self, angle):
+            # Normalize the angle to be within the range of -180 to 180 degrees
+            while angle > 180:
+                angle -= 360
+            while angle < -180:
+                angle += 360
+            return angle
+    
+        def navigate_to(self, next_position):
+            distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
+            print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
+            turn_angle = self.normalize_angle(target_angle - self.angle)  # Normalize the turn angle
+            print(f"Calculated Turn Angle: {turn_angle}")  # Debugging calculated turn angle
+            self.position = next_position
+            self.angle = target_angle
+            # Format the instruction as a string before returning
+            instruction = f"2,{turn_angle},{distance}"
+            print(f"Current Position: {self.position}, Target Position: {next_position}, Distance: {distance}")  # Debugging
+            return instruction
+        def deposit_balls(self, next_position):
+            distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
+            print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
+            turn_angle = self.normalize_angle(target_angle - self.angle)  # Normalize the turn angle
+            print(f"Calculated Turn Angle: {turn_angle}")  # Debugging calculated turn angle
+            self.position = next_position
+            self.angle = target_angle
+            # Format the instruction as a string before returning
+            instruction = f"1,{turn_angle},{distance}"
+            print(f"Current Position: {self.position}, Target Position: {next_position}, Distance: {distance}")  # Debugging
+            return instruction
+    
+    def tcpserver(host='192.168.252.28', port=8000):
+        # Define the hardcoded grid and object positions
+        ball_positions = [ 
+            ("golden_ball", orange_ball_coords)
+        ]
+        
+        for i in range(len(white_ball_coords)):
+            ball_positions.append(("white_ball",white_ball_coords[i]))
+        
+        start_position = robot_coords
+        goose_egg_position = egg_coords
+        final_position = (550, 0)  # Final target position
+        
+        # Define the areas (top-left and bottom-right corners)
+        areas = [
+            ((-15, 100), (15, -100)),
+            ((-100, 15), (100, -15)),
+            ((0, 0), (0, 0)),
+            ((834, 625), (850, -625)),
+            ((-850, 625), (-834, -625)),
+            ((-850, 625), (850, 609)),
+            ((-850, -609), (850, -625))
+        ]
+        
+        # Determine the quadrant and update area_top_left3 and area_bottom_right3
+        kvadrant_egg = 1
+        if goose_egg_position[0] > 0:
+            if goose_egg_position[1] > 0:
+                kvadrant_egg = 1
+            else:
+                kvadrant_egg = 4
+        else:
+            if goose_egg_position[1] > 0:
+                kvadrant_egg = 2
+            else:
+                kvadrant_egg = 3
+        
+        if kvadrant_egg == 1:
+            area_top_left3 = (15, 100)
+            area_bottom_right3 = (100, 15)
+        elif kvadrant_egg == 2:
+            area_top_left3 = (-100, 100)
+            area_bottom_right3 = (-15, 15)
+        elif kvadrant_egg == 3:
+            area_top_left3 = (-100, -15)
+            area_bottom_right3 = (-15, -100)
+        elif kvadrant_egg == 4:
+            area_top_left3 = (15, -15)
+            area_bottom_right3 = (100, -100)
+        else:
+            area_top_left3 = (0, 0)
+            area_bottom_right3 = (0, 0)
+        
+        areas[2] = (area_top_left3, area_bottom_right3)
+        
+        # Define the size of the collector
+        collector_size = (90, 90)  # Width and height of the collector
+        
+        # List to store the route
+        route = []
+        
+        # Initial position
+        current_position = start_position
+        
+        # Ensure the golden ball is visited first or second
+        golden_ball = next(ball for ball in ball_positions if ball[0] == "golden_ball")
+        ball_positions.remove(golden_ball)
+        route.append(golden_ball)
+        current_position = golden_ball[1]
+        
+        # Find the closest reachable ball and update the route
+        robot_navigation = RobotNavigation(start_position)
+        while ball_positions:
+            closest_ball = robot_navigation.find_closest_reachable_ball(current_position, ball_positions, areas, collector_size)
+            if closest_ball:
+                route.append(closest_ball)
+                current_position = closest_ball[1]
+                ball_positions.remove(closest_ball)
+            else:
+                # Move in the direction to reach any remaining balls, in steps of 50
+                if any(ball[1][0] > current_position[0] for ball in ball_positions):
+                    current_position = (current_position[0] + 50, current_position[1])
+                    route.append(("move", current_position))
+                elif any(ball[1][0] < current_position[0] for ball in ball_positions):
+                    current_position = (current_position[0] - 50, current_position[1])
+                    route.append(("move", current_position))
+                elif any(ball[1][1] > current_position[1] for ball in ball_positions):
+                    current_position = (current_position[0], current_position[1] + 50)
+                    route.append(("move", current_position))
+                elif any(ball[1][1] < current_position[1] for ball in ball_positions):
+                    current_position = (current_position[0], current_position[1] - 50)
+                    route.append(("move", current_position))
+        
+        # Try to move directly to the final target position
+        if not any(robot_navigation.is_area_between(current_position, final_position, area[0], area[1], collector_size) for area in areas):
+            route.append(("move", final_position))
+        else:
+            # Move to the final target position in steps of 50 units, avoiding obstacles
+            final_route = robot_navigation.move_towards_target(current_position, final_position, areas, collector_size)
+            route.extend(final_route)
+    
+        # deposit turn codinates
+        route.append(("deposit", (549,0)))
+        
+        # Output the route
+        print("Route to collect all balls and reach the target position:")
+        for step in route:
+            print(f"{step[0]} at {step[1]}")
+            
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((host, port))
+            s.listen()
+            print(f"TCP Server listening on {host}:{port}")
+            
+            conn, addr = s.accept()
+            with conn:
+                print(f"Connected to {addr}")
+                robot = RobotNavigation(start_position)
+                
+                # Wait for the initial position message from the client
+                initial_message = conn.recv(1024).decode()
+                print(f"Received initial message from client: {initial_message}")
+                
+                for ball_type, position in route:
+                    if ball_type == "deposit": 
+                        instruction = robot.deposit_balls(position)
+                    else:
+                   	    instruction = robot.navigate_to(position)
+                    
+                    if instruction:
+                        print(f"Sending instruction for {ball_type} at position {position}: {instruction}")
+                        conn.sendall(instruction.encode())
+                        # Wait for acknowledgment from the client before sending the next instruction
+                        ack = conn.recv(1024).decode()
+                        print(f"Received ACK: {ack}")  # Debugging: Print the received acknowledgment
+                        if ack != "ACK":
+                            print("Failed to receive acknowledgment from the client")
+                            break
+        
+                # Wait for any new instructions or updates from the client
+                while True:
+                    update = conn.recv(1024)
+                    if update:
+                        update_message = update.decode()
+                        print(f"Received update from client: {update_message}")
+                        # Handle the update message, update ball positions, or any other logic as needed
+    
+    if __name__ == "__main__":
+        tcpserver()
+    
+    
+    
+
+    # Break the loop on 'q' key press
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+# Release the webcam and close the window
+cap.release()
+cv2.destroyAllWindows()

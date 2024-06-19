@@ -5,6 +5,7 @@ import time
 import numpy as np
 import socket
 import math
+from collections import deque
 
 # Load the trained YOLOv8 model
 model = YOLO(r'C:\Users\mathi\Desktop\CDIO-repos\CDIO.v4i.yolov8\best.pt')
@@ -135,8 +136,46 @@ class RobotNavigation:
             return True
 
         return False
+    
+    # Function to check if a point is within a rectangular area with a buffer
+    def is_point_in_area(point, area_top_left, area_bottom_right, buffer_size=100):
+        expanded_top_left = (area_top_left[0] - buffer_size, area_top_left[1] + buffer_size)
+        expanded_bottom_right = (area_bottom_right[0] + buffer_size, area_bottom_right[1] - buffer_size)
+        return (expanded_top_left[0] <= point[0] <= expanded_bottom_right[0] and
+                expanded_bottom_right[1] <= point[1] <= expanded_top_left[1])
+    
+    # Function to check if a move intersects with any obstacle
+    def is_move_valid(current_position, next_position, areas, balls, collector_size):
+        for area in areas:
+            if RobotNavigation.is_area_between(current_position, next_position, area[0], area[1], collector_size):
+                return False
+        for ball in balls:
+            if ball[0] == "tennis_ball" and RobotNavigation.do_intersect(current_position, next_position, ball[1], ball[1]):
+                return False
+        return True
+    
+    # Function to navigate around obstacles using BFS
+    def bfs_pathfinding(start, goal, areas, balls, collector_size, step=5):
+        directions = [(step, 0), (-step, 0), (0, step), (0, -step)]
+        queue = deque([(start, [])])
+        visited = set()
+        visited.add(start)
 
-    def find_closest_reachable_ball(self, current_position, balls, areas, collector_size):
+        while queue:
+            current_position, path = queue.popleft()
+            if RobotNavigation.euclidean_distance(current_position, goal) <= step:
+                return path + [("move", goal)]
+
+            for direction in directions:
+                next_position = (current_position[0] + direction[0], current_position[1] + direction[1])
+                if next_position not in visited and RobotNavigation.is_move_valid(current_position, next_position, areas, balls, collector_size):
+                    visited.add(next_position)
+                    queue.append((next_position, path + [("move", next_position)]))
+
+        return []
+    
+    # Function to find the closest reachable ball
+    def find_closest_reachable_ball(current_position, balls, areas, collector_size):
         min_distance = float('inf')
         closest_ball = None
 
@@ -156,8 +195,30 @@ class RobotNavigation:
                     closest_ball = ball
 
         return closest_ball
+    
+    # Function to combine consecutive moves in the same direction using lookahead
+    def combine_consecutive_moves(route):
+        if not route:
+            return route
+        
+        optimized_route = []
+        i = 0
 
-    def move_towards_target(self, current_position, target_position, areas, collector_size, step=50):
+        while i < len(route):
+            if route[i][0] == "move":
+                j = i + 1
+                while j < len(route) and route[j][0] == "move" and (
+                    (route[j][1][0] == route[i][1][0]) or (route[j][1][1] == route[i][1][1])):
+                    j += 1
+                optimized_route.append(("move", route[j-1][1]))
+                i = j
+            else:
+                optimized_route.append(route[i])
+                i += 1
+
+        return optimized_route
+
+    def move_towards_target(self, current_position, target_position, areas, collector_size, step=5):
         route = []
         while current_position != target_position:
             next_position = current_position
@@ -213,6 +274,18 @@ class RobotNavigation:
             angle += 360
         return angle
 
+    def navigate_to_move(self, next_position):
+        distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
+        print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
+        turn_angle = self.normalize_angle(target_angle - self.angle)  # Normalize the turn angle
+        print(f"Calculated Turn Angle: {turn_angle}")  # Debugging calculated turn angle
+        self.position = next_position
+        self.angle = target_angle
+        # Format the instruction as a string before returning
+        instruction = f"2,{turn_angle},{distance}"
+        print(f"Current Position: {self.position}, Target Position: {next_position}, Distance: {distance}")  # Debugging
+        return instruction
+    
     def navigate_to(self, next_position):
         distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
         print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
@@ -406,53 +479,87 @@ def camera_route():
 
     # Initial position
     current_position = start_position
+    
+    # Filter out balls that are within any of the defined areas with buffer
+    filtered_ball_positions = [
+        ball for ball in ball_positions
+        if not any(RobotNavigation.is_point_in_area(ball[1], area[0], area[1], buffer_size=50) for area in areas)
+    ]
+    
+    # Prioritize the golden ball
+    golden_ball = next(ball for ball in filtered_ball_positions if ball[0] == "golden_ball")
 
-    # Ensure the golden ball is visited first or second
-    golden_ball = next(ball for ball in ball_positions if ball[0] == "golden_ball")
-    ball_positions.remove(golden_ball)
-    route.append(golden_ball)
-    current_position = golden_ball[1]
+    # Try to move directly to the golden ball
+    print(f"Trying to move directly to the golden ball at {golden_ball[1]} from {current_position}")
+    if not any(RobotNavigation.is_area_between(current_position, golden_ball[1], area[0], area[1], collector_size) for area in areas):
+        route.append(golden_ball)
+        current_position = golden_ball[1]
+        filtered_ball_positions.remove(golden_ball)
+        print(f"Moved directly to the golden ball at {current_position}")
+    else:
+        # Navigate around obstacles to reach the golden ball
+        print("Navigating around obstacles to reach the golden ball")
+        path_to_golden_ball = RobotNavigation.bfs_pathfinding(current_position, golden_ball[1], areas, filtered_ball_positions, collector_size)
+        route.extend(path_to_golden_ball)
+        route.pop()
+        route.append(golden_ball)
+        current_position = golden_ball[1]
+        filtered_ball_positions.remove(golden_ball)
+        print(f"Reached the golden ball at {current_position}")
 
     # Find the closest reachable ball and update the route
-    robot_navigation = RobotNavigation(start_position)
-    while ball_positions:
-        closest_ball = robot_navigation.find_closest_reachable_ball(current_position, ball_positions, areas, collector_size)
+    while filtered_ball_positions:
+        closest_ball = RobotNavigation.find_closest_reachable_ball(current_position, filtered_ball_positions, areas, collector_size)
         if closest_ball:
+            print(f"Found closest reachable ball at {closest_ball[1]}")
             route.append(closest_ball)
             current_position = closest_ball[1]
-            ball_positions.remove(closest_ball)
+            filtered_ball_positions.remove(closest_ball)
         else:
-            # Move in the direction to reach any remaining balls, in steps of 50
-            if any(ball[1][0] > current_position[0] for ball in ball_positions):
-                current_position = (current_position[0] + 50, current_position[1])
+            print("No reachable ball found, moving in steps of 5")
+            # Move in the direction to reach any remaining balls, in steps of 5
+            if any(ball[1][0] > current_position[0] for ball in filtered_ball_positions):
+                current_position = (current_position[0] + 5, current_position[1])
                 route.append(("move", current_position))
-            elif any(ball[1][0] < current_position[0] for ball in ball_positions):
-                current_position = (current_position[0] - 50, current_position[1])
+            elif any(ball[1][0] < current_position[0] for ball in filtered_ball_positions):
+                current_position = (current_position[0] - 5, current_position[1])
                 route.append(("move", current_position))
-            elif any(ball[1][1] > current_position[1] for ball in ball_positions):
-                current_position = (current_position[0], current_position[1] + 50)
+            elif any(ball[1][1] > current_position[1] for ball in filtered_ball_positions):
+                current_position = (current_position[0], current_position[1] + 5)
                 route.append(("move", current_position))
-            elif any(ball[1][1] < current_position[1] for ball in ball_positions):
-                current_position = (current_position[0], current_position[1] - 50)
+            elif any(ball[1][1] < current_position[1] for ball in filtered_ball_positions):
+                current_position = (current_position[0], current_position[1] - 5)
                 route.append(("move", current_position))
 
     # Try to move directly to the final target position
-    if not any(robot_navigation.is_area_between(current_position, final_position, area[0], area[1], collector_size) for area in areas):
+    print(f"Trying to move directly to the final position at {final_position} from {current_position}")
+    if not any(RobotNavigation.is_area_between(current_position, final_position, area[0], area[1], collector_size) for area in areas):
         route.append(("move", final_position))
+        print(f"Moved directly to the final position at {final_position}")
     else:
         # Move to the final target position in steps of 50 units, avoiding obstacles
-        final_route = robot_navigation.move_towards_target(current_position, final_position, areas, collector_size)
+        print("Navigating around obstacles to reach the final position")
+        final_route = RobotNavigation.bfs_pathfinding(current_position, final_position, areas, filtered_ball_positions, collector_size)
         route.extend(final_route)
+        print(f"Reached the final position at {final_position}")
 
-    # deposit turn coordinates
+    # Deposit turn coordinates
     route.append(("deposit", (549, 0)))
 
+    # Optimize the route by combining consecutive moves in the same direction
+    optimized_route = RobotNavigation.combine_consecutive_moves(route)
+
     # Output the route
-    print("Route to collect all balls and reach the target position:")
+    print("Optimized route to collect all balls and reach the target position:")
     for step in route:
         print(f"{step[0]} at {step[1]}")
+
+    # Output the optimized route
+    print("Optimized route to collect all balls and reach the target position:")
+    for step in optimized_route:
+        print(f"{step[0]} at {step[1]}")
         
-    return route, start_position
+    return optimized_route, start_position
 
 def tcpserver(host='192.168.252.28', port=5000):
 

@@ -8,7 +8,7 @@ import math
 from collections import deque
 
 # Load the trained YOLOv8 model
-model = YOLO(r'C:\Users\mathi\Desktop\CDIO-repos\CDIO.v4i.yolov8\best.pt')
+model = YOLO(r'C:\Users\mathi\Desktop\CDIO.v7-test.yolov8\best.pt')
 
 # Define confidence thresholds for specific labels
 conf_thresholds = {
@@ -137,14 +137,14 @@ class RobotNavigation:
 
         return False
     
-    # Function to check if a point is within a rectangular area with a buffer
+    @staticmethod
     def is_point_in_area(point, area_top_left, area_bottom_right, buffer_size=100):
         expanded_top_left = (area_top_left[0] - buffer_size, area_top_left[1] + buffer_size)
         expanded_bottom_right = (area_bottom_right[0] + buffer_size, area_bottom_right[1] - buffer_size)
         return (expanded_top_left[0] <= point[0] <= expanded_bottom_right[0] and
                 expanded_bottom_right[1] <= point[1] <= expanded_top_left[1])
     
-    # Function to check if a move intersects with any obstacle
+    @staticmethod
     def is_move_valid(current_position, next_position, areas, balls, collector_size):
         for area in areas:
             if RobotNavigation.is_area_between(current_position, next_position, area[0], area[1], collector_size):
@@ -154,7 +154,7 @@ class RobotNavigation:
                 return False
         return True
     
-    # Function to navigate around obstacles using BFS
+    @staticmethod
     def bfs_pathfinding(start, goal, areas, balls, collector_size, step=5):
         directions = [(step, 0), (-step, 0), (0, step), (0, -step)]
         queue = deque([(start, [])])
@@ -174,7 +174,7 @@ class RobotNavigation:
 
         return []
     
-    # Function to find the closest reachable ball
+    @staticmethod
     def find_closest_reachable_ball(current_position, balls, areas, collector_size):
         min_distance = float('inf')
         closest_ball = None
@@ -196,7 +196,7 @@ class RobotNavigation:
 
         return closest_ball
     
-    # Function to combine consecutive moves in the same direction using lookahead
+    @staticmethod
     def combine_consecutive_moves(route):
         if not route:
             return route
@@ -217,6 +217,10 @@ class RobotNavigation:
                 i += 1
 
         return optimized_route
+
+    @staticmethod
+    def calculate_distance_scaling_factor(D_cam_cross, D_cross_obj):
+        return D_cam_cross / (D_cam_cross + D_cross_obj)
 
     def move_towards_target(self, current_position, target_position, areas, collector_size, step=5):
         route = []
@@ -381,27 +385,34 @@ def camera_route():
         x_forskel = længde_millimeter / (height_coords[0][2] - height_coords[0][0])
 
         print(f"yforksle er {y_forskel}\n xforskel er {x_forskel}\n")
+
+        # Camera to cross distance in millimeters (you should replace this with the actual measured value)
+        D_cam_cross = 1695
+
+        def apply_parallax_correction(obj_coords, cross_coords, x_forskel, y_forskel):
+            D_cross_obj = RobotNavigation.euclidean_distance(cross_coords, obj_coords)
+            scaling_factor = RobotNavigation.calculate_distance_scaling_factor(D_cam_cross, D_cross_obj)
+            corrected_coords = (
+                (obj_coords[0] - cross_coords[0]) * x_forskel * (-1) * scaling_factor,
+                (obj_coords[1] - cross_coords[1]) * y_forskel * scaling_factor
+            )
+            return corrected_coords
+
         # Convert white ball coordinates
         for i in range(len(white_ball_coords)):
-            cords = white_ball_coords[i]
-            cords = (cords[0] - cross_coords[0], cords[1] - cross_coords[1])
-            cords = (cords[0] * x_forskel * (-1), cords[1] * y_forskel)
-            white_ball_coords[i] = cords
+            white_ball_coords[i] = apply_parallax_correction(white_ball_coords[i], cross_coords, x_forskel, y_forskel)
 
         # Convert egg coordinates
         if egg_coords:
-            egg_coords = (egg_coords[0] - cross_coords[0], egg_coords[1] - cross_coords[1])
-            egg_coords = (egg_coords[0] * x_forskel * (-1), egg_coords[1] * y_forskel)
+            egg_coords = apply_parallax_correction(egg_coords, cross_coords, x_forskel, y_forskel)
 
         # Convert orange ball coordinates
         if orange_ball_coords:
-            orange_ball_coords = (orange_ball_coords[0] - cross_coords[0], orange_ball_coords[1] - cross_coords[1])
-            orange_ball_coords = (orange_ball_coords[0] * x_forskel * (-1), orange_ball_coords[1] * y_forskel)
+            orange_ball_coords = apply_parallax_correction(orange_ball_coords, cross_coords, x_forskel, y_forskel)
 
         # Convert robot coordinates
         if robot_coords:
-            robot_coords = (robot_coords[0] - cross_coords[0], robot_coords[1] - cross_coords[1])
-            robot_coords = (robot_coords[0] * x_forskel * (-1), robot_coords[1] * y_forskel)
+            robot_coords = apply_parallax_correction(robot_coords, cross_coords, x_forskel, y_forskel)
 
     # Display the resulting frame
     cv2.imshow('Webcam Object Detection', frame)
@@ -472,7 +483,7 @@ def camera_route():
         ]
 
     # Define the size of the collector
-    collector_size = (90, 90)  # Width and height of the collector
+    collector_size = (150, 150)  # Width and height of the collector
 
     # List to store the route
     route = []
@@ -600,7 +611,7 @@ def tcpserver(host='192.168.252.28', port=5000):
                 # while True:
                 #     update = conn.recv(1024)
                 #     if update:
-                #         update_message = update.decode()
+                #         update message = update.decode()
                 #         print(f"Received update from client: {update_message}")
                         # Handle the update message, update ball positions, or any other logic as needed
 

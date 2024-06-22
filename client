@@ -8,6 +8,9 @@ import socket
 import gc
 import time
 
+
+##The code is based off of Pybricks ev3 tutorial: https://pybricks.com/ev3-micropython/examples/robot_educator_basic.html
+
 # Initialize the EV3 Brick
 ev3 = EV3Brick()
 

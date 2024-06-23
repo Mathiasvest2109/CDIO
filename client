@@ -8,9 +8,6 @@ import socket
 import gc
 import time
 
-
-##The code is based off of Pybricks ev3 tutorial: https://pybricks.com/ev3-micropython/examples/robot_educator_basic.html
-
 # Initialize the EV3 Brick
 ev3 = EV3Brick()
 
@@ -23,6 +20,7 @@ gyro.reset_angle(0)
 # Initialize the drive base
 left_motor = Motor(Port.C)
 right_motor = Motor(Port.B)
+drop_off = Motor(Port.A)
 pick_up = Motor(Port.D)
 
 robot = DriveBase(left_motor, right_motor, wheel_diameter=56, axle_track=114)
@@ -93,6 +91,39 @@ def execute_instruction(instruction):
         
         # Ensure the robot completes the straight movement before proceeding
         robot.stop()
+
+        # Send acknowledgment to the server 
+        sock.sendall("ACK".encode())
+        print("Sent ACK")  # Debugging: Confirm acknowledgment sent
+        wait(1000)  # Add a small delay to ensure the ACK is sent
+    
+    elif parts[0] == '1':
+        print("We are in deposit now")
+        turn_angle = float(parts[1])
+        distance = float(parts[2])
+        print("Received instruction to turn {} degrees and move {} mm".format(turn_angle, distance))
+        ev3.speaker.beep()  # Beep to indicate instruction receipt
+
+        # Use turn_mode to perform the turn using the gyroscope
+        turn_mode(turn_angle)
+
+        # Move straight for the specified distance
+        robot.straight((distance * 1.75 * -1) + 30)
+        
+        # Ensure the robot completes the straight movement before proceeding
+        robot.stop()
+
+        # Turn the motor by -30 degrees
+        drop_off.run_target(speed=200, target_angle=-40)
+        # Wait a bit to ensure the motor completes the action
+        wait(1000)
+        drop_off.run_target(speed=200, target_angle=0)
+        # Wait a bit to ensure the motor completes the action
+        wait(1000)
+        drop_off.run_target(speed=200, target_angle=-40)
+        # Wait a bit to ensure the motor completes the action
+        wait(1000)
+        drop_off.run_target(speed=200, target_angle=0)
 
         # Send acknowledgment to the server 
         sock.sendall("ACK".encode())

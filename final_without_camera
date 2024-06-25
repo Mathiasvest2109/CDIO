@@ -1,0 +1,447 @@
+import cv2
+import torch
+from ultralytics import YOLO
+import time
+import numpy as np
+import socket
+import math
+from collections import deque
+
+class RobotNavigation:
+    
+    def __init__(self, start_position):
+        self.position = start_position
+        self.angle = -180  # Initial angle set to -90 degrees based on the robot facing left
+
+    @staticmethod
+    def euclidean_distance(point1, point2):
+        return math.sqrt((point1[0] - point2[0])**2 + (point1[1] - point2[1])**2)
+
+    @staticmethod
+    def do_intersect(p1, q1, p2, q2):
+        def orientation(p, q, r):
+            val = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+            if val == 0:
+                return 0
+            elif val > 0:
+                return 1
+            else:
+                return 2
+
+        def on_segment(p, q, r):
+            if (q[0] <= max(p[0], r[0]) and q[0] >= min(p[0], r[0]) and
+                q[1] <= max(p[1], r[1]) and q[1] >= min(p[1], r[1])):
+                return True
+            return False
+
+        o1 = orientation(p1, q1, p2)
+        o2 = orientation(p1, q1, q2)
+        o3 = orientation(p2, q2, p1)
+        o4 = orientation(p2, q2, q1)
+
+        if o1 != o2 and o3 != o4:
+            return True
+
+        if o1 == 0 and on_segment(p1, p2, q1):
+            return True
+
+        if o2 == 0 and on_segment(p1, q2, q1):
+            return True
+
+        if o3 == 0 and on_segment(p2, p1, q2):
+            return True
+
+        if o4 == 0 and on_segment(p2, q1, q2):
+            return True
+
+        return False
+
+    @staticmethod
+    def is_area_between(point_a, point_b, area_top_left, area_bottom_right, collector_size):
+        collector_width, collector_height = collector_size
+        buffer_x = collector_width / 2
+        buffer_y = collector_height / 2
+
+        # Expand the area by the collector size
+        expanded_top_left = (area_top_left[0] - buffer_x, area_top_left[1] + buffer_y)
+        expanded_bottom_right = (area_bottom_right[0] + buffer_x, area_bottom_right[1] - buffer_y)
+
+        # Define the corners of the expanded rectangle
+        top_left = expanded_top_left
+        top_right = (expanded_bottom_right[0], expanded_top_left[1])
+        bottom_left = (expanded_top_left[0], expanded_bottom_right[1])
+        bottom_right = expanded_bottom_right
+
+        # Check if the line segment intersects with any of the four edges of the rectangle
+        if (RobotNavigation.do_intersect(point_a, point_b, top_left, top_right) or
+            RobotNavigation.do_intersect(point_a, point_b, top_right, bottom_right) or
+            RobotNavigation.do_intersect(point_a, point_b, bottom_right, bottom_left) or
+            RobotNavigation.do_intersect(point_a, point_b, bottom_left, top_left)):
+            return True
+
+        return False
+    
+    # Function to check if a point is within a rectangular area with a buffer
+    def is_point_in_area(point, area_top_left, area_bottom_right, buffer_size=100):
+        expanded_top_left = (area_top_left[0] - buffer_size, area_top_left[1] + buffer_size)
+        expanded_bottom_right = (area_bottom_right[0] + buffer_size, area_bottom_right[1] - buffer_size)
+        return (expanded_top_left[0] <= point[0] <= expanded_bottom_right[0] and
+                expanded_bottom_right[1] <= point[1] <= expanded_top_left[1])
+    
+    # Function to check if a move intersects with any obstacle
+    def is_move_valid(current_position, next_position, areas, balls, collector_size):
+        for area in areas:
+            if RobotNavigation.is_area_between(current_position, next_position, area[0], area[1], collector_size):
+                return False
+        for ball in balls:
+            if ball[0] == "tennis_ball" and RobotNavigation.do_intersect(current_position, next_position, ball[1], ball[1]):
+                return False
+        return True
+    
+    # Function to navigate around obstacles using BFS
+    def bfs_pathfinding(start, goal, areas, balls, collector_size, step=5):
+        directions = [(step, 0), (-step, 0), (0, step), (0, -step)]
+        queue = deque([(start, [])])
+        visited = set()
+        visited.add(start)
+
+        while queue:
+            current_position, path = queue.popleft()
+            if RobotNavigation.euclidean_distance(current_position, goal) <= step:
+                return path + [("move", goal)]
+
+            for direction in directions:
+                next_position = (current_position[0] + direction[0], current_position[1] + direction[1])
+                if next_position not in visited and RobotNavigation.is_move_valid(current_position, next_position, areas, balls, collector_size):
+                    visited.add(next_position)
+                    queue.append((next_position, path + [("move", next_position)]))
+
+        return []
+    
+    # Function to find the closest reachable ball
+    def find_closest_reachable_ball(current_position, balls, areas, collector_size):
+        min_distance = float('inf')
+        closest_ball = None
+
+        for ball in balls:
+            ball_position = ball[1]
+            is_reachable = True
+
+            for area in areas:
+                if RobotNavigation.is_area_between(current_position, ball_position, area[0], area[1], collector_size):
+                    is_reachable = False
+                    break
+
+            if is_reachable:
+                distance = RobotNavigation.euclidean_distance(current_position, ball_position)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_ball = ball
+
+        return closest_ball
+    
+    # Function to combine consecutive moves in the same direction using lookahead
+    def combine_consecutive_moves(route):
+        if not route:
+            return route
+        
+        optimized_route = []
+        i = 0
+
+        while i < len(route):
+            if route[i][0] == "move":
+                j = i + 1
+                while j < len(route) and route[j][0] == "move" and (
+                    (route[j][1][0] == route[i][1][0]) or (route[j][1][1] == route[i][1][1])):
+                    j += 1
+                optimized_route.append(("move", route[j-1][1]))
+                i = j
+            else:
+                optimized_route.append(route[i])
+                i += 1
+
+        return optimized_route
+
+    def move_towards_target(self, current_position, target_position, areas, collector_size, step=5):
+        route = []
+        while current_position != target_position:
+            next_position = current_position
+            if target_position[0] > current_position[0]:
+                next_position = (current_position[0] + step, current_position[1])
+            elif target_position[0] < current_position[0]:
+                next_position = (current_position[0] - step, current_position[1])
+            elif target_position[1] > current_position[1]:
+                next_position = (current_position[0], current_position[1] + step)
+            elif target_position[1] < current_position[1]:
+                next_position = (current_position[0], current_position[1] - step)
+
+            # Check if the move is valid
+            is_reachable = True
+            for area in areas:
+                if RobotNavigation.is_area_between(current_position, next_position, area[0], area[1], collector_size):
+                    is_reachable = False
+                    break
+
+            if is_reachable:
+                current_position = next_position
+                route.append(("move", current_position))
+            else:
+                # Try the next direction
+                if target_position[0] != current_position[0]:
+                    if target_position[0] > current_position[0]:
+                        current_position = (current_position[0] + step, current_position[1])
+                    else:
+                        current_position = (current_position[0] - step, current_position[1])
+                    route.append(("move", current_position))
+                elif target_position[1] != current_position[1]:
+                    if target_position[1] > current_position[1]:
+                        current_position = (current_position[0], current_position[1] + step)
+                    else:
+                        current_position = (current_position[0], current_position[1] - step)
+                    route.append(("move", current_position))
+
+        return route
+
+    def calculate_distance_and_angle(self, current_position, next_position):
+        dx = next_position[0] - current_position[0]
+        dy = next_position[1] - current_position[1]
+        distance = math.sqrt(dx**2 + dy**2)
+        angle = math.degrees(math.atan2(dy, dx))
+        print(f"dx: {dx}, dy: {dy}, distance: {distance}, angle: {angle}")  # Debugging
+        return distance, angle
+
+    def normalize_angle(self, angle):
+        # Normalize the angle to be within the range of -180 to 180 degrees
+        while angle > 180:
+            angle -= 360
+        while angle < -180:
+            angle += 360
+        return angle
+
+    def navigate_to_move(self, next_position):
+        distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
+        print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
+        turn_angle = self.normalize_angle(target_angle - self.angle)  # Normalize the turn angle
+        print(f"Calculated Turn Angle: {turn_angle}")  # Debugging calculated turn angle
+        self.position = next_position
+        self.angle = target_angle
+        # Format the instruction as a string before returning
+        instruction = f"2,{turn_angle},{distance}"
+        print(f"Current Position: {self.position}, Target Position: {next_position}, Distance: {distance}")  # Debugging
+        return instruction
+    
+    def navigate_to(self, next_position):
+        distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
+        print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
+        turn_angle = self.normalize_angle(target_angle - self.angle)  # Normalize the turn angle
+        print(f"Calculated Turn Angle: {turn_angle}")  # Debugging calculated turn angle
+        self.position = next_position
+        self.angle = target_angle
+        # Format the instruction as a string before returning
+        instruction = f"2,{turn_angle},{distance}"
+        print(f"Current Position: {self.position}, Target Position: {next_position}, Distance: {distance}")  # Debugging
+        return instruction
+
+    def deposit_balls(self, next_position):
+        distance, target_angle = self.calculate_distance_and_angle(self.position, next_position)
+        print(f"Current Angle: {self.angle}, Target Angle: {target_angle}")  # Debugging current and target angles
+        turn_angle = self.normalize_angle(target_angle - self.angle)  # Normalize the turn angle
+        print(f"Calculated Turn Angle: {turn_angle}")  # Debugging calculated turn angle
+        self.position = next_position
+        self.angle = target_angle
+        # Format the instruction as a string before returning
+        instruction = f"1,{turn_angle},{distance}"
+        print(f"Current Position: {self.position}, Target Position: {next_position}, Distance: {distance}")  # Debugging
+        return instruction
+
+
+def camera_route():
+    ball_positions = [ 
+        ("golden_ball", (-550, -375)),
+        ("tennis_ball", (-550, 270)),
+        ("tennis_ball", (-270, 0)),
+        ("tennis_ball", (385, 350)),
+        ("tennis_ball", (490, -145))
+    ]
+    
+    start_position = (350, -450)
+    goose_egg_position = (-50, -50)
+    final_position = (550, 0)  # Final target position
+
+    # Initialize the areas list
+    areas = []
+
+    # Check if goose_egg_position is not None before using it
+    if goose_egg_position:
+        # Determine the quadrant and update area_top_left3 and area_bottom_right3
+        kvadrant_egg = 1
+        if goose_egg_position[0] > 0:
+            if goose_egg_position[1] > 0:
+                kvadrant_egg = 1
+            else:
+                kvadrant_egg = 4
+        else:
+            if goose_egg_position[1] > 0:
+                kvadrant_egg = 2
+            else:
+                kvadrant_egg = 3
+
+        if kvadrant_egg == 1:
+            area_top_left3 = (15, 100)
+            area_bottom_right3 = (100, 15)
+        elif kvadrant_egg == 2:
+            area_top_left3 = (-100, 100)
+            area_bottom_right3 = (-15, 15)
+        elif kvadrant_egg == 3:
+            area_top_left3 = (-100, -15)
+            area_bottom_right3 = (-15, -100)
+        elif kvadrant_egg == 4:
+            area_top_left3 = (15, -15)
+            area_bottom_right3 = (100, -100)
+        else:
+            area_top_left3 = (0, 0)
+            area_bottom_right3 = (0, 0)
+
+        areas = [
+            ((-15, 100), (15, -100)),
+            ((-100, 15), (100, -15)),
+            (area_top_left3, area_bottom_right3),
+            ((834, 625), (850, -625)),
+            ((-850, 625), (-834, -625)),
+            ((-850, 625), (850, 609)),
+            ((-850, -609), (850, -625))
+        ]
+
+    # Define the size of the collector
+    collector_size = (90, 90)  # Width and height of the collector
+
+    # List to store the route
+    route = []
+
+    # Initial position
+    current_position = start_position
+    
+    # Filter out balls that are within any of the defined areas with buffer
+    filtered_ball_positions = [
+        ball for ball in ball_positions
+        if not any(RobotNavigation.is_point_in_area(ball[1], area[0], area[1], buffer_size=150) for area in areas)
+    ]
+    
+    # Prioritize the golden ball
+    golden_ball = next(ball for ball in filtered_ball_positions if ball[0] == "golden_ball")
+
+    # Try to move directly to the golden ball
+    print(f"Trying to move directly to the golden ball at {golden_ball[1]} from {current_position}")
+    if not any(RobotNavigation.is_area_between(current_position, golden_ball[1], area[0], area[1], collector_size) for area in areas):
+        route.append(golden_ball)
+        current_position = golden_ball[1]
+        filtered_ball_positions.remove(golden_ball)
+        print(f"Moved directly to the golden ball at {current_position}")
+    else:
+        # Navigate around obstacles to reach the golden ball
+        print("Navigating around obstacles to reach the golden ball")
+        path_to_golden_ball = RobotNavigation.bfs_pathfinding(current_position, golden_ball[1], areas, filtered_ball_positions, collector_size)
+        route.extend(path_to_golden_ball)
+        current_position = golden_ball[1]
+        filtered_ball_positions.remove(golden_ball)
+        print(f"Reached the golden ball at {current_position}")
+
+    # Find the closest reachable ball and update the route
+    while filtered_ball_positions:
+        closest_ball = RobotNavigation.find_closest_reachable_ball(current_position, filtered_ball_positions, areas, collector_size)
+        if closest_ball:
+            print(f"Found closest reachable ball at {closest_ball[1]}")
+            route.append(closest_ball)
+            current_position = closest_ball[1]
+            filtered_ball_positions.remove(closest_ball)
+        else:
+            print("No reachable ball found, moving in steps of 5")
+            # Move in the direction to reach any remaining balls, in steps of 5
+            if any(ball[1][0] > current_position[0] for ball in filtered_ball_positions):
+                current_position = (current_position[0] + 5, current_position[1])
+                route.append(("move", current_position))
+            elif any(ball[1][0] < current_position[0] for ball in filtered_ball_positions):
+                current_position = (current_position[0] - 5, current_position[1])
+                route.append(("move", current_position))
+            elif any(ball[1][1] > current_position[1] for ball in filtered_ball_positions):
+                current_position = (current_position[0], current_position[1] + 5)
+                route.append(("move", current_position))
+            elif any(ball[1][1] < current_position[1] for ball in filtered_ball_positions):
+                current_position = (current_position[0], current_position[1] - 5)
+                route.append(("move", current_position))
+
+    # Try to move directly to the final target position
+    print(f"Trying to move directly to the final position at {final_position} from {current_position}")
+    if not any(RobotNavigation.is_area_between(current_position, final_position, area[0], area[1], collector_size) for area in areas):
+        route.append(("move", final_position))
+        print(f"Moved directly to the final position at {final_position}")
+    else:
+        # Move to the final target position in steps of 50 units, avoiding obstacles
+        print("Navigating around obstacles to reach the final position")
+        final_route = RobotNavigation.bfs_pathfinding(current_position, final_position, areas, filtered_ball_positions, collector_size)
+        route.extend(final_route)
+        print(f"Reached the final position at {final_position}")
+
+    # Deposit turn coordinates
+    route.append(("deposit", (549, 0)))
+
+    # Optimize the route by combining consecutive moves in the same direction
+    optimized_route = RobotNavigation.combine_consecutive_moves(route)
+
+    # Output the route
+    print("Optimized route to collect all balls and reach the target position:")
+    for step in route:
+        print(f"{step[0]} at {step[1]}")
+
+    # Output the optimized route
+    print("Optimized route to collect all balls and reach the target position:")
+    for step in optimized_route:
+        print(f"{step[0]} at {step[1]}")
+        
+    return optimized_route, start_position
+
+def tcpserver(host='192.168.252.28', port=5000):
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((host, port))
+        s.listen()
+        print(f"TCP Server listening on {host}:{port}")
+
+        conn, addr = s.accept()
+        with conn:
+            print(f"Connected to {addr}")
+            while True:
+                routes, start_positioning = camera_route()
+                robot = RobotNavigation(start_positioning)
+    
+                # Wait for the initial position message from the client
+                # initial_message = conn.recv(1024).decode()
+                # print(f"Received initial message from client: {initial_message}")
+    
+                for ball_type, position in routes:
+                    if ball_type == "deposit": 
+                        instruction = robot.deposit_balls(position)
+                    else:
+                        instruction = robot.navigate_to(position)
+                           
+                    if instruction:
+                        print(f"Sending instruction for {ball_type} at position {position}: {instruction}")
+                        conn.sendall(instruction.encode())
+                        # Wait for acknowledgment from the client before sending the next instruction
+                        ack = conn.recv(1024).decode()
+                        print(f"Received ACK: {ack}")  # Debugging: Print the received acknowledgment
+                        while ack != "ACK":
+                            print("Failed to receive acknowledgment from the client, retrying...")
+                            ack = conn.recv(1024).decode()
+                            print(f"Received ACK: {ack}")
+    
+                # Wait for any new instructions or updates from the client
+                # while True:
+                #     update = conn.recv(1024)
+                #     if update:
+                #         update_message = update.decode()
+                #         print(f"Received update from client: {update_message}")
+                        # Handle the update message, update ball positions, or any other logic as needed
+
+if __name__ == "__main__":
+    tcpserver()

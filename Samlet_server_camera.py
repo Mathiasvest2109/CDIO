@@ -16,7 +16,7 @@ conf_thresholds = {
     'Small_Goal': 1,
     'Height': 0.7,
     'Width': 0.7
-    # Add more labels and their specific thresholds here if needed
+    
 }
 
 # Default confidence threshold for other labels

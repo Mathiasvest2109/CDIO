@@ -608,3 +608,4 @@ if __name__ == "__main__":
 # Release the webcam and close the window
 cap.release()
 cv2.destroyAllWindows()
+

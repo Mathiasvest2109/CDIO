@@ -515,7 +515,7 @@ def camera_route():
             filtered_ball_positions.remove(closest_ball)
         else:
             print("No reachable ball found, moving in steps of 30")
-            # Move in the direction to reach any remaining balls, in steps of 5
+            # Move in the direction to reach any remaining balls, in steps of 30
             if any(ball[1][0] > current_position[0] for ball in filtered_ball_positions):
                 current_position = (current_position[0] + 30, current_position[1])
                 route.append(("move", current_position))
